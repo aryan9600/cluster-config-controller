@@ -1,0 +1,16 @@
+domain: toolkit.fluxcd.io
+layout:
+- go.kubebuilder.io/v3
+projectName: cluster-config-controller
+repo: github.com/aryan9600/cluster-config-controller
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: toolkit.fluxcd.io
+  group: extensions
+  kind: ClusterConfigMap
+  path: github.com/aryan9600/cluster-config-controller/api/v1alpha1
+  version: v1alpha1
+version: "3"
