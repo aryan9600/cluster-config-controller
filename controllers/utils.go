@@ -80,8 +80,9 @@ func upsertConfigmap(ctx context.Context, identifier types.NamespacedName, confi
 			if err := client.Create(ctx, &configMap); err != nil {
 				return err
 			}
+		} else {
+			return err
 		}
-		return err
 	}
 	return nil
 }

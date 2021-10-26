@@ -78,18 +78,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ClusterConfigMapReconciler{
+	ccmReconciler := &controllers.ClusterConfigMapReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		Log:    ctrl.Log.WithName("controllers").WithName("ClusterConfigMap"),
-	}).SetupWithManager(mgr); err != nil {
+	}
+
+	if err = ccmReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterConfigMap")
 		os.Exit(1)
 	}
 	if err = (&controllers.NamespaceReconicler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Namespace"),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		Log:           ctrl.Log.WithName("controllers").WithName("Namespace"),
+		CCMReconciler: ccmReconciler,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Namespace")
 		os.Exit(1)

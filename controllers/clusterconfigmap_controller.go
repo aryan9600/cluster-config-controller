@@ -18,13 +18,13 @@ package controllers
 
 import (
 	"context"
-	"reflect"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ref "k8s.io/client-go/tools/reference"
 
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -34,7 +34,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/aryan9600/cluster-config-controller/api/v1alpha1"
 	extensionsv1alpha1 "github.com/aryan9600/cluster-config-controller/api/v1alpha1"
 	"github.com/go-logr/logr"
 )
@@ -44,6 +43,8 @@ type ClusterConfigMapReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	Log    logr.Logger
+	// Requeue channel for creating ConfigMaps upon Namespace events.
+	requeueCh chan event.GenericEvent
 }
 
 var configMapNameKey = ".metadata.name"
@@ -82,8 +83,6 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		clusterConfigMap.Status.ConfigMaps = append(clusterConfigMap.Status.ConfigMaps, *configMapRef)
 	}
 
-	log.Info("Fetched", len(childConfigMaps.Items))
-
 	// Update the status.
 	if err := r.Status().Update(ctx, &clusterConfigMap); err != nil {
 		log.Error(err, "could not update ClusterConfigMap CRD status")
@@ -106,7 +105,7 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	var statusNamespaces []corev1.Namespace
 
 	// Loop through the ConfigMaps present in Status and:
-	//	1. Form a list of Namespaces that have those ConfigMaps.
+	//  1. Form a list of Namespaces that have those ConfigMaps.
 	//  2. Delete the ConfigMap if a Namespace is in the cluster Status but not in the Spec.
 	for _, statusConfigMap := range clusterConfigMap.Status.ConfigMaps {
 		// Fetch the namespaces present in the cluster.
@@ -145,6 +144,7 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			}
 			identifier := types.NamespacedName{Namespace: specNameSpace.GetName(), Name: clusterConfigMap.GetName()}
 			if err := upsertConfigmap(ctx, identifier, configMap, r.Client); err != nil {
+				log.Error(err, "could not upsert cm")
 				return ctrl.Result{}, err
 			}
 		}
@@ -169,88 +169,12 @@ func (r *ClusterConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}); err != nil {
 		return err
 	}
+	r.requeueCh = make(chan event.GenericEvent)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extensionsv1alpha1.ClusterConfigMap{}).
 		Owns(&corev1.ConfigMap{}).
-		Complete(r)
-}
-
-type NamespaceReconicler struct {
-	client.Client
-	Scheme *runtime.Scheme
-	Log    logr.Logger
-}
-
-//+kubebuilder:rbac:groups=extensions.toolkit.fluxcd.io,resources=clusterconfigmaps,verbs=get;list;watch
-//+kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
-//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
-func (r *NamespaceReconicler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("Namespace", req.NamespacedName)
-
-	// Fetch required Namespace according to the req.
-	var namespace corev1.Namespace
-	if err := r.Get(ctx, req.NamespacedName, &namespace); err != nil {
-		log.Error(err, "could not fetch namespace")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-	namespaceLabels := namespace.GetLabels()
-
-	// Fetch all the ClusterConfigMaps in the cluster.
-	var clusterConfigMaps v1alpha1.ClusterConfigMapList
-	if err := r.List(ctx, &clusterConfigMaps); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	items := clusterConfigMaps.Items
-	// Loop through the ClusterConfigMaps, check if the labels are a subset of the Namespace's labels
-	// and create the ConfigMap accordingly.
-	for _, clusterConfigMap := range items {
-		clusterConfigMap := clusterConfigMap
-		clusterConfigMapLables := clusterConfigMap.Spec.GenerateTo.NamespaceSelectors.MatchLabels
-		if isMapSubset(namespaceLabels, clusterConfigMapLables) {
-			data := clusterConfigMap.Spec.Data
-			configMap := corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels:      make(map[string]string),
-					Annotations: make(map[string]string),
-					Name:        clusterConfigMap.GetName(),
-					Namespace:   namespace.GetName(),
-				},
-				Data: data,
-			}
-			identifier := types.NamespacedName{Namespace: namespace.GetName(), Name: clusterConfigMap.GetName()}
-			if err := upsertConfigmap(ctx, identifier, configMap, r.Client); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	}
-	return ctrl.Result{}, nil
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *NamespaceReconicler) SetupWithManager(mgr ctrl.Manager) error {
-	log := r.Log
-	namespacePredicate := predicate.Funcs{
-		CreateFunc: func(ce event.CreateEvent) bool {
-			return true
-		},
-		UpdateFunc: func(ue event.UpdateEvent) bool {
-			if ue.ObjectOld == nil {
-				log.Error(nil, "Update event has no old object to update", "event", ue)
-				return false
-			}
-			if ue.ObjectNew == nil {
-				log.Error(nil, "Update event has no new object for update", "event", ue)
-				return false
-			}
-
-			return !reflect.DeepEqual(ue.ObjectNew.GetLabels(), ue.ObjectOld.GetLabels())
-		},
-		DeleteFunc:  func(de event.DeleteEvent) bool { return false },
-		GenericFunc: func(ge event.GenericEvent) bool { return false },
-	}
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Namespace{}).
-		WithEventFilter(namespacePredicate).
+		Watches(&source.Channel{
+			Source: r.requeueCh,
+		}, &handler.EnqueueRequestForObject{}).
 		Complete(r)
 }
