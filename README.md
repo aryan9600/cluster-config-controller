@@ -22,7 +22,7 @@ cluster-config-controller is a tool (a Kubernetes operator) to manage ConfigMaps
     metadata:
         name: ns1
         labels:
-            app.kubernetes.io/managed-by: "dev-team"
+            managed: "aryan"
     ```
    `kubectl apply -f ns1.yaml` 
    

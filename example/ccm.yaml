@@ -1,7 +1,7 @@
 apiVersion: extensions.toolkit.fluxcd.io/v1alpha1
 kind: ClusterConfigMap
 metadata:
-  name: cluster-info
+  name: app-info
 spec:
   data:
     environment: "dev"
@@ -10,4 +10,4 @@ spec:
   generateTo:
     namespaceSelectors:
       matchLabels:
-        app.kubernetes.io/managed-by: "dev-team"
+        managed: "aryan"
