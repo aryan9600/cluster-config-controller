@@ -251,7 +251,7 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 					}
 				}
 				return true
-			})
+			}).Should(BeTrue())
 		})
 	})
 })
