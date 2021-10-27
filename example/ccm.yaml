@@ -1,0 +1,13 @@
+apiVersion: extensions.toolkit.fluxcd.io/v1alpha1
+kind: ClusterConfigMap
+metadata:
+  name: cluster-info
+spec:
+  data:
+    environment: "dev"
+    region: "eu-central-1"
+    domain: "dev.example.com"
+  generateTo:
+    namespaceSelectors:
+      matchLabels:
+        app.kubernetes.io/managed-by: "dev-team"
