@@ -89,7 +89,7 @@ var _ = BeforeSuite(func() {
 
 	LabelSelector = metav1.LabelSelector{
 		MatchLabels: map[string]string{
-			"app.kubernetes.io/context": "test",
+			"app.kubernetes.io/context": "testing",
 		},
 	}
 

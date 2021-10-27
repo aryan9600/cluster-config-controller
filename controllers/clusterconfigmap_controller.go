@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ref "k8s.io/client-go/tools/reference"
 
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -64,6 +65,37 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	finalizerName := "extensions.toolkit.fluxcd.io/finalizer"
+
+	if clusterConfigMap.DeletionTimestamp.IsZero() {
+		if !containsString(clusterConfigMap.GetFinalizers(), finalizerName) {
+			controllerutil.AddFinalizer(&clusterConfigMap, finalizerName)
+			if err := r.Update(ctx, &clusterConfigMap); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		if containsString(clusterConfigMap.GetFinalizers(), finalizerName) {
+			var childCCMs corev1.ConfigMapList
+			if err := r.List(ctx, &childCCMs, client.MatchingFields{configMapNameKey: req.Name}); err != nil {
+				log.Error(err, "unable to list child config maps")
+				return ctrl.Result{}, err
+			}
+			for _, cm := range childCCMs.Items {
+				if err := r.Delete(ctx, &cm); err != nil {
+					log.Error(err, "unable to delete child config maps")
+					return ctrl.Result{}, err
+				}
+			}
+			controllerutil.RemoveFinalizer(&clusterConfigMap, finalizerName)
+			if err := r.Update(ctx, &clusterConfigMap); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// Stop reconciliation as the item is being deleted
+		return ctrl.Result{}, nil
+	}
+
 	// Fetch all the child ConfigMaps created by this ClusterConfigMap.
 	var childConfigMaps corev1.ConfigMapList
 	if err := r.List(ctx, &childConfigMaps, client.MatchingFields{configMapNameKey: req.Name}); err != nil {
@@ -94,6 +126,7 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Fetch all namespaces defined by the spec.
 	var specNamespaces corev1.NamespaceList
 	labelSelectors, err := metav1.LabelSelectorAsSelector(&spec.GenerateTo.NamespaceSelectors)
+	log.Info("spec", "nsSelector", spec.GenerateTo.NamespaceSelectors.MatchLabels)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -172,7 +205,7 @@ func (r *ClusterConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.requeueCh = make(chan event.GenericEvent)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extensionsv1alpha1.ClusterConfigMap{}).
-		Owns(&corev1.ConfigMap{}).
+		// Owns(&corev1.ConfigMap{}).
 		Watches(&source.Channel{
 			Source: r.requeueCh,
 		}, &handler.EnqueueRequestForObject{}).
