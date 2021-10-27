@@ -17,11 +17,14 @@ limitations under the License.
 package controllers
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,6 +44,7 @@ import (
 var cfg *rest.Config
 var k8sClient client.Client
 var testEnv *envtest.Environment
+var LabelSelector metav1.LabelSelector
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
@@ -81,6 +85,42 @@ var _ = BeforeSuite(func() {
 		Client: k8sManager.GetClient(),
 		Scheme: k8sManager.GetScheme(),
 		Log:    ctrl.Log.WithName("controllers").WithName("ClusterConfigMap"),
+	}
+
+	LabelSelector = metav1.LabelSelector{
+		MatchLabels: map[string]string{
+			"app.kubernetes.io/context": "test",
+		},
+	}
+
+	var nameSpaces []corev1.Namespace
+	nameSpaces = append(nameSpaces, corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: make(map[string]string),
+			Labels:      LabelSelector.MatchLabels,
+			Name:        "ns1",
+		},
+	})
+	nameSpaces = append(nameSpaces, corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: make(map[string]string),
+			Labels:      LabelSelector.MatchLabels,
+			Name:        "ns2",
+		},
+	})
+	nameSpaces = append(nameSpaces, corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: make(map[string]string),
+			Labels: map[string]string{
+				"app.kubernetes.io/context": "prod",
+			},
+			Name: "ns3",
+		},
+	})
+
+	for _, ns := range nameSpaces {
+		ns := ns
+		k8sClient.Create(context.Background(), &ns)
 	}
 
 	err = ccmReconciler.SetupWithManager(k8sManager)
