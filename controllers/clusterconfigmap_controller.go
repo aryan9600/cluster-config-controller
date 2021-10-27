@@ -65,42 +65,47 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	log.Info("Fetched ClusterConfigMap", "Identidier", req.NamespacedName)
+
 	finalizerName := "extensions.toolkit.fluxcd.io/finalizer"
-
-	if clusterConfigMap.DeletionTimestamp.IsZero() {
-		if !containsString(clusterConfigMap.GetFinalizers(), finalizerName) {
-			controllerutil.AddFinalizer(&clusterConfigMap, finalizerName)
-			if err := r.Update(ctx, &clusterConfigMap); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-	} else {
-		if containsString(clusterConfigMap.GetFinalizers(), finalizerName) {
-			var childCCMs corev1.ConfigMapList
-			if err := r.List(ctx, &childCCMs, client.MatchingFields{configMapNameKey: req.Name}); err != nil {
-				log.Error(err, "unable to list child config maps")
-				return ctrl.Result{}, err
-			}
-			for _, cm := range childCCMs.Items {
-				if err := r.Delete(ctx, &cm); err != nil {
-					log.Error(err, "unable to delete child config maps")
-					return ctrl.Result{}, err
-				}
-			}
-			controllerutil.RemoveFinalizer(&clusterConfigMap, finalizerName)
-			if err := r.Update(ctx, &clusterConfigMap); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		// Stop reconciliation as the item is being deleted
-		return ctrl.Result{}, nil
-	}
-
 	// Fetch all the child ConfigMaps created by this ClusterConfigMap.
 	var childConfigMaps corev1.ConfigMapList
 	if err := r.List(ctx, &childConfigMaps, client.MatchingFields{configMapNameKey: req.Name}); err != nil {
 		log.Error(err, "unable to list child config maps")
 		return ctrl.Result{}, err
+	}
+
+	log.Info("Fetched child ConfigMaps", "Quantity", len(childConfigMaps.Items))
+
+	// Use DeletionTimestamp to determine whether object is being deleted or not.
+	if clusterConfigMap.DeletionTimestamp.IsZero() {
+		// Add finalizer if it doesn't exist.
+		if !containsString(clusterConfigMap.GetFinalizers(), finalizerName) {
+			controllerutil.AddFinalizer(&clusterConfigMap, finalizerName)
+			if err := r.Update(ctx, &clusterConfigMap); err != nil {
+				log.Error(err, "Could not add finalizer to ClusterConfigMap")
+				return ctrl.Result{}, err
+			}
+		}
+	} else {
+		// ClusterConfigMap is being deleted.
+		if containsString(clusterConfigMap.GetFinalizers(), finalizerName) {
+			// Delete all child ConfigMaps.
+			for _, cm := range childConfigMaps.Items {
+				if err := r.Delete(ctx, &cm); err != nil {
+					log.Error(err, "unable to delete child config maps")
+					return ctrl.Result{}, err
+				}
+			}
+			// Remove finalizer from the object.
+			controllerutil.RemoveFinalizer(&clusterConfigMap, finalizerName)
+			if err := r.Update(ctx, &clusterConfigMap); err != nil {
+				log.Error(err, "unable to remove finalizer from ClusterConfigMap")
+				return ctrl.Result{}, err
+			}
+		}
+
+		return ctrl.Result{}, nil
 	}
 
 	// Populate the current status by storing the references to all the child ConfigMaps
@@ -109,7 +114,7 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		childConfigMap := childConfigMap
 		configMapRef, err := ref.GetReference(r.Scheme, &childConfigMap)
 		if err != nil {
-			log.Error(err, "unable to make reference to child config map", "clusterConfigMap", childConfigMap)
+			log.Error(err, "unable to make reference to child config map")
 			continue
 		}
 		clusterConfigMap.Status.ConfigMaps = append(clusterConfigMap.Status.ConfigMaps, *configMapRef)
@@ -126,11 +131,12 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	// Fetch all namespaces defined by the spec.
 	var specNamespaces corev1.NamespaceList
 	labelSelectors, err := metav1.LabelSelectorAsSelector(&spec.GenerateTo.NamespaceSelectors)
-	log.Info("spec", "nsSelector", spec.GenerateTo.NamespaceSelectors.MatchLabels)
 	if err != nil {
+		log.Error(err, "could not form LabelSelector to match against Namespaces")
 		return ctrl.Result{}, err
 	}
 	if err := r.List(ctx, &specNamespaces, client.MatchingLabelsSelector{Selector: labelSelectors}); err != nil {
+		log.Error(err, "could not list Namespaces with matching labels")
 		return ctrl.Result{}, err
 	}
 
@@ -145,6 +151,7 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		statusConfigMap := statusConfigMap
 		var nameSpace corev1.Namespace
 		if err := r.Get(ctx, client.ObjectKey{Name: statusConfigMap.Namespace}, &nameSpace); err != nil {
+			log.Error(err, "Could not get Namespace present in CRD status")
 			return ctrl.Result{}, err
 		}
 		statusNamespaces = append(statusNamespaces, nameSpace)
@@ -153,9 +160,11 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		if !valid {
 			var configMap corev1.ConfigMap
 			if err := r.Get(ctx, types.NamespacedName{Namespace: statusConfigMap.Namespace, Name: statusConfigMap.Name}, &configMap); err != nil {
+				log.Error(err, "Could not get ConfigMap", "ns", statusConfigMap.Namespace)
 				return ctrl.Result{}, err
 			}
 			if err := r.Delete(ctx, &configMap); err != nil {
+				log.Error(err, "Could not delete ConfigMap", "ns", statusConfigMap.Namespace)
 				return ctrl.Result{}, err
 			}
 		}
@@ -187,7 +196,10 @@ func (r *ClusterConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	for _, childConfigMap := range childConfigMaps.Items {
 		childConfigMap := childConfigMap
 		childConfigMap.Data = spec.Data
-		r.Update(ctx, &childConfigMap)
+		if err := r.Update(ctx, &childConfigMap); err != nil {
+			log.Error(err, "Could not update config map", "ConfigMap", childConfigMap)
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -205,7 +217,6 @@ func (r *ClusterConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.requeueCh = make(chan event.GenericEvent)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&extensionsv1alpha1.ClusterConfigMap{}).
-		// Owns(&corev1.ConfigMap{}).
 		Watches(&source.Channel{
 			Source: r.requeueCh,
 		}, &handler.EnqueueRequestForObject{}).

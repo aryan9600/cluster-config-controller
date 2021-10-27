@@ -38,6 +38,7 @@ func (r *NamespaceReconicler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Fetch all the ClusterConfigMaps in the cluster.
 	var clusterConfigMaps v1alpha1.ClusterConfigMapList
 	if err := r.List(ctx, &clusterConfigMaps); err != nil {
+		log.Error(err, "Could not list ClusterConfigMaps")
 		return ctrl.Result{}, err
 	}
 

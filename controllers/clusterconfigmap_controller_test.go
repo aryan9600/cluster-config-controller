@@ -64,10 +64,10 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			By("Checking whether a ConfigMap with the same name got created in the matching namespace.")
-			Eventually(func() (int, error) {
+			Eventually(func() int {
 				var cmList corev1.ConfigMapList
 				if err := k8sClient.List(ctx, &cmList); err != nil {
-					return 0, err
+					return 0
 				}
 				c := 0
 				for _, cm := range cmList.Items {
@@ -75,7 +75,7 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 						c += 1
 					}
 				}
-				return c, nil
+				return c
 			}, timeout, interval).Should(Equal(2))
 		})
 	})
@@ -105,24 +105,18 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 
 			By("Checking if the `.data` got updated of all child ConfigMaps")
-			Eventually(func() (int, error) {
+			Eventually(func() int {
 				var cmList corev1.ConfigMapList
 				c := 0
 				if err := k8sClient.List(context.Background(), &cmList); err != nil {
-					return 0, err
+					return 0
 				}
 				for _, cm := range cmList.Items {
 					if cm.GetName() == ccmName && cm.Data["this"] == "is not the way" {
-						// GinkgoWriter.Write([]byte(cm.GetName()))
-						// GinkgoWriter.Write([]byte("\n"))
-						// GinkgoWriter.Write([]byte(fmt.Sprint(c)))
-						// GinkgoWriter.Write([]byte("\n"))
-						// GinkgoWriter.Write([]byte(cm.GetNamespace()))
-						// GinkgoWriter.Write([]byte("\n"))
 						c += 1
 					}
 				}
-				return c, nil
+				return c
 			}, timeout, interval).Should(Equal(2))
 		})
 	})
@@ -141,43 +135,43 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			})).Should(Succeed())
 
 			By("Checking if the existing ConfigMaps in Namespaces 'ns1' and 'ns2' got deleted.")
-			Eventually(func() (bool, error) {
+			Eventually(func() bool {
 				var nsList corev1.NamespaceList
 				labelSelector, err := metav1.LabelSelectorAsSelector(&LabelSelector)
 				if err != nil {
-					return false, err
+					return false
 				}
 				if err := k8sClient.List(context.Background(), &nsList, client.MatchingLabelsSelector{Selector: labelSelector}); err != nil {
-					return false, err
+					return false
 				}
 				for _, ns := range nsList.Items {
 					var cm corev1.ConfigMap
 					if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns.Name, Name: ccmName}, &cm); err != nil {
 						if !apierrors.IsNotFound(err) {
-							return false, err
+							return false
 						}
 					}
 				}
-				return true, nil
+				return true
 			}, timeout, interval).Should(BeTrue())
 
 			By("Checking if the a new ConfigMap in Namespaces 'ns3' got created.")
-			Eventually(func() (bool, error) {
+			Eventually(func() bool {
 				var nsList corev1.NamespaceList
 				var labels client.MatchingLabels
 				labels = map[string]string{"app.kubernetes.io/context": "prod"}
 				if err := k8sClient.List(context.Background(), &nsList, labels); err != nil {
-					return false, err
+					return false
 				}
 				for _, ns := range nsList.Items {
 					var cm corev1.ConfigMap
 					if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: ns.Name, Name: ccmName}, &cm); err != nil {
 						if apierrors.IsNotFound(err) {
-							return false, err
+							return false
 						}
 					}
 				}
-				return true, nil
+				return true
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
@@ -197,12 +191,12 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			Expect(k8sClient.Create(context.Background(), &ns)).Should(Succeed())
 
 			By("Checking if a new ConfigMap got created in the 'ns4'")
-			Eventually(func() (bool, error) {
+			Eventually(func() bool {
 				var cm corev1.ConfigMap
 				if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: "ns4", Name: ccmName}, &cm); err != nil {
-					return false, err
+					return false
 				}
-				return true, nil
+				return true
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
@@ -211,11 +205,11 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 		It("Should create a ConfigMap in the Namespace if the label match the ones specified in the ClusterConfigMap", func() {
 			By("Modifying the label selctors of a Namespace")
 			var ns corev1.Namespace
-			Eventually(func() (bool, error) {
+			Eventually(func() bool {
 				if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "ns2"}, &ns); err != nil {
-					return false, err
+					return false
 				}
-				return true, nil
+				return true
 			}, timeout, interval).Should(BeTrue())
 			ns.SetLabels(map[string]string{
 				"app.kubernetes.io/context": "prod",
@@ -223,12 +217,12 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			Expect(k8sClient.Update(context.Background(), &ns)).Should(Succeed())
 
 			By("Checking if a new ConfigMap got created in the 'ns2'")
-			Eventually(func() (bool, error) {
+			Eventually(func() bool {
 				var cm corev1.ConfigMap
 				if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: "ns2", Name: ccmName}, &cm); err != nil {
-					return false, err
+					return false
 				}
-				return true, nil
+				return true
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
@@ -246,17 +240,17 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			Expect(k8sClient.Delete(context.Background(), &ccm)).Should(Succeed())
 
 			By("Checking the existence of all it's child ConfigMaps")
-			Eventually(func() (bool, error) {
+			Eventually(func() bool {
 				var configMaps corev1.ConfigMapList
 				if err := k8sClient.List(context.Background(), &configMaps); err != nil {
-					return false, err
+					return false
 				}
 				for _, cm := range configMaps.Items {
 					if cm.GetName() == ccmName {
-						return false, nil
+						return false
 					}
 				}
-				return true, nil
+				return true
 			})
 		})
 	})
