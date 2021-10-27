@@ -232,4 +232,32 @@ var _ = Describe("ClusterConfigMap Controller", func() {
 			}, timeout, interval).Should(BeTrue())
 		})
 	})
+
+	Context("When deleting a ClusterConfigMap", func() {
+		It("Should delete all it's child ConfigMaps", func() {
+			By("Deleting the ClusterConfigMap")
+			var ccm extensionsv1alpha1.ClusterConfigMap
+			Eventually(func() bool {
+				if err := k8sClient.Get(context.Background(), ccmObjectKey, &ccm); err != nil {
+					return false
+				}
+				return true
+			}, timeout, interval).Should(BeTrue())
+			Expect(k8sClient.Delete(context.Background(), &ccm)).Should(Succeed())
+
+			By("Checking the existence of all it's child ConfigMaps")
+			Eventually(func() (bool, error) {
+				var configMaps corev1.ConfigMapList
+				if err := k8sClient.List(context.Background(), &configMaps); err != nil {
+					return false, err
+				}
+				for _, cm := range configMaps.Items {
+					if cm.GetName() == ccmName {
+						return false, nil
+					}
+				}
+				return true, nil
+			})
+		})
+	})
 })
